@@ -95,18 +95,80 @@ FROM VALUES
 -2
 NULL
 
+# Every interval unit is returned unchanged
+query BBT
+SELECT positive(arrow_cast('1 day 2 hours', 'Interval(DayTime)')) = arrow_cast('1 day 2 hours', 'Interval(DayTime)'),
+  positive(arrow_cast('1 month 2 days 3 nanoseconds', 'Interval(MonthDayNano)')) = arrow_cast('1 month 2 days 3 nanoseconds', 'Interval(MonthDayNano)'),
+  arrow_typeof(positive(arrow_cast('1 month 2 days 3 nanoseconds', 'Interval(MonthDayNano)')));
+----
+true true Interval(MonthDayNano)
+
+# STRING columns of every string type, with valid, malformed and NULL rows
+query RRR
+SELECT positive(column1), positive(arrow_cast(column1, 'LargeUtf8')), positive(arrow_cast(column1, 'Utf8View'))
+FROM VALUES ('-1.5'), ('abc'), (NULL);
+----
+-1.5 -1.5 -1.5
+NULL NULL NULL
+NULL NULL NULL
+
+# Dictionary-encoded inputs use their value type
+query RTIT
+SELECT positive(arrow_cast('-1.5', 'Dictionary(Int32, Utf8)')), arrow_typeof(positive(arrow_cast('-1.5', 'Dictionary(Int32, Utf8)'))),
+  positive(arrow_cast(arrow_cast(-2, 'Int64'), 'Dictionary(Int32, Int64)')), arrow_typeof(positive(arrow_cast(arrow_cast(-2, 'Int64'), 'Dictionary(Int32, Int64)')));
+----
+-1.5 Float64 -2 Int64
+
+# Known difference: Spark parses strings with Java's Double.parseDouble, which accepts a type
+# suffix and hex floats, so Spark returns 1.5 and 8.0. Arrow's cast returns NULL for both.
+# query RR
+# SELECT positive('1.5d'), positive('0x1p3');
+# ----
+# 1.5 8.0
+
+# The function is removed from the plan, so it does not block pushdown
+statement ok
+set datafusion.explain.logical_plan_only = true;
+
+query TT
+EXPLAIN SELECT positive(column1) FROM VALUES (1);
+----
+logical_plan
+01)Projection: column1 AS positive(column1)
+02)--Values: (Int64(1))
+
+query TT
+EXPLAIN SELECT positive(column1) FROM VALUES ('-1.5');
+----
+logical_plan
+01)Projection: TRY_CAST(column1 AS Float64) AS positive(column1)
+02)--Values: (Utf8("-1.5"))
+
+statement ok
+set datafusion.explain.logical_plan_only = false;
+
 # DATE, TIMESTAMP, BOOLEAN and BINARY are rejected
-query error positive requires a numeric or interval input, got Date32
+query error positive requires a numeric, interval or string input, got Date32
 SELECT positive('1999-01-01'::date);
 
-query error positive requires a numeric or interval input, got Timestamp
+query error positive requires a numeric, interval or string input, got Timestamp
 SELECT positive('1999-01-01 00:00:00'::timestamp);
 
-query error positive requires a numeric or interval input, got Boolean
+query error positive requires a numeric, interval or string input, got Boolean
 SELECT positive(true);
 
-query error positive requires a numeric or interval input, got Binary
+query error positive requires a numeric, interval or string input, got Binary
 SELECT positive(X'01');
+
+# Types Spark does not have are rejected
+query error positive requires a numeric, interval or string input, got UInt8
+SELECT positive(arrow_cast(1, 'UInt8'));
+
+query error positive requires a numeric, interval or string input, got Float16
+SELECT positive(arrow_cast(1, 'Float16'));
+
+query error positive requires a numeric, interval or string input, got Duration
+SELECT positive(arrow_cast(1, 'Duration(Second)'));
 
 # A malformed STRING raises an error when ANSI mode is on
 statement ok
@@ -119,6 +181,9 @@ SELECT positive('-1.11');
 
 query error Cannot cast string 'abc' to value of Float64 type
 SELECT positive('abc');
+
+query error Cannot cast string 'abc' to value of Float64 type
+SELECT positive(arrow_cast(column1, 'Utf8View')) FROM VALUES ('-1.5'), ('abc');
 
 statement ok
 set datafusion.execution.enable_ansi_mode = false;
