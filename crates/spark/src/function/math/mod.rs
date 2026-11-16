@@ -15,6 +15,7 @@ pub mod hex;
 pub mod hypot;
 pub mod modulus;
 pub mod negative;
+pub mod positive;
 pub mod pow;
 pub mod rint;
 pub mod round;
@@ -36,6 +37,7 @@ make_udf_function!(hex::SparkHex, hex);
 make_udf_function!(hypot::SparkHypot, hypot);
 make_udf_function!(modulus::SparkMod, modulus);
 make_udf_function!(modulus::SparkPmod, pmod);
+make_udf_function!(positive::SparkPositive, positive);
 make_udf_function!(pow::SparkPow, pow);
 make_udf_function!(rint::SparkRint, rint);
 make_udf_function!(round::SparkRound, round);
@@ -87,6 +89,7 @@ pub mod expr_fn {
         "Returns the negation of expr (unary minus).",
         arg1
     ));
+    export_functions!((positive, "Returns expr unchanged (unary plus).", arg1));
     export_functions!((
         bin,
         "Returns the string representation of the long value represented in binary.",
@@ -114,6 +117,7 @@ pub fn functions() -> Vec<Arc<ScalarUDF>> {
         csc(),
         sec(),
         negative(),
+        positive(),
         bin(),
     ]
 }
