@@ -150,6 +150,14 @@ SELECT bround(2.25::decimal(3,2), 1::bigint) AS a, bround(2.25::decimal(3,2), 1 
 ----
 2.2 2.2 2.2
 
+# The result type needs the scale, so it relies on the optimizer folding it first
+query TTTT
+SELECT arrow_typeof(bround(2.25::decimal(3,2), 1::bigint)) AS a, arrow_typeof(bround(2.25::decimal(3,2), 1 + 0)) AS b,
+  arrow_typeof(bround(2.25::decimal(3,2), CAST(1 AS INT))) AS c, arrow_typeof(bround(column1, 1::bigint)) AS d
+FROM VALUES (2.25::decimal(3,2));
+----
+Decimal128(3, 1) Decimal128(3, 1) Decimal128(3, 1) Decimal128(3, 1)
+
 # Decimal precision is capped at 38 and narrow decimals are widened
 query RT
 SELECT bround(arrow_cast(999999999, 'Decimal32(9,0)'), -1), arrow_typeof(bround(arrow_cast(999999999, 'Decimal32(9,0)'), -1));
