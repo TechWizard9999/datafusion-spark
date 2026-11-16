@@ -163,9 +163,14 @@ impl ScalarUDFImpl for SparkDatePart {
                     None,
                 )));
             }
-            Err(e) => {
-                let data_type = info.get_data_type(&date_expr)?;
-                return plan_err!("{}", e.message(&data_type));
+            Err(FieldError::Invalid(name)) => {
+                let message =
+                    FieldError::Invalid(name).message(&info.get_data_type(&date_expr)?);
+                return plan_err!("{message}");
+            }
+            // Not known at planning time (e.g. a parameter), so `invoke_with_args` checks it
+            Err(FieldError::NotConstant) => {
+                return Ok(ExprSimplifyResult::Original(vec![part_expr, date_expr]));
             }
         };
 
@@ -211,10 +216,12 @@ impl FieldError<'_> {
 fn check_field(
     field: Option<&ScalarValue>,
 ) -> std::result::Result<ExtractField, FieldError<'_>> {
-    match field {
-        Some(ScalarValue::Utf8(Some(name)))
-        | Some(ScalarValue::Utf8View(Some(name)))
-        | Some(ScalarValue::LargeUtf8(Some(name))) => {
+    let Some(field) = field else {
+        return Err(FieldError::NotConstant);
+    };
+    // `try_as_str` also handles dictionary and run-end encoded strings
+    match field.try_as_str() {
+        Some(Some(name)) => {
             let lower = name.to_lowercase();
             let Some(part) = SPARK_FIELDS
                 .iter()
@@ -231,8 +238,9 @@ fn check_field(
                 other => other,
             }))
         }
-        Some(value) if value.is_null() => Ok(ExtractField::Null),
-        _ => Err(FieldError::NotConstant),
+        Some(None) => Ok(ExtractField::Null),
+        None if field.is_null() => Ok(ExtractField::Null),
+        None => Err(FieldError::NotConstant),
     }
 }
 
@@ -404,5 +412,63 @@ mod tests {
         .unwrap();
         assert_eq!(result.data_type(), &DataType::Int32);
         assert!(result.is_null(0));
+    }
+
+    #[test]
+    fn invoke_accepts_an_encoded_string_field() {
+        let dictionary = ScalarValue::Dictionary(
+            Box::new(DataType::Int32),
+            Box::new(ScalarValue::Utf8(Some("year".to_string()))),
+        );
+        let result = invoke(
+            dictionary,
+            ColumnarValue::Scalar(ScalarValue::Date32(Some(DATE))),
+        )
+        .unwrap()
+        .into_array(1)
+        .unwrap();
+        assert_eq!(
+            ScalarValue::try_from_array(&result, 0).unwrap(),
+            ScalarValue::Int32(Some(2000))
+        );
+    }
+
+    #[test]
+    fn invoke_rejects_a_field_that_is_not_constant() {
+        let fields: ArrayRef = Arc::new(arrow::array::StringArray::from(vec!["year"]));
+        let err = SparkDatePart::new()
+            .invoke_with_args(ScalarFunctionArgs {
+                arg_fields: vec![
+                    Arc::new(Field::new("field", DataType::Utf8, true)),
+                    Arc::new(Field::new("source", DataType::Date32, true)),
+                ],
+                args: vec![
+                    ColumnarValue::Array(fields),
+                    ColumnarValue::Scalar(ScalarValue::Date32(Some(DATE))),
+                ],
+                number_rows: 1,
+                return_field: Arc::new(Field::new("date_part", DataType::Int32, true)),
+                config_options: Arc::new(ConfigOptions::default()),
+            })
+            .unwrap_err();
+        assert!(err.to_string().starts_with("Execution error:"), "{err}");
+        assert!(
+            err.to_string().contains("must be a constant string"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn invoke_rejects_an_invalid_field_for_a_timestamp() {
+        let source =
+            ScalarValue::TimestampMicrosecond(Some(TIMESTAMP_SECONDS * 1_000_000), None);
+        let err = invoke(field("DAYOFYEAR"), ColumnarValue::Scalar(source)).unwrap_err();
+        assert!(err.to_string().starts_with("Execution error:"), "{err}");
+        assert!(
+            err.to_string().contains(
+                "Cannot extract `DAYOFYEAR` from Timestamp(µs). SQLSTATE: 42601"
+            ),
+            "{err}"
+        );
     }
 }

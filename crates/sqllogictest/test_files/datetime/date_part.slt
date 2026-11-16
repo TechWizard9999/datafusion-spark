@@ -45,8 +45,24 @@ SELECT date_part('QTR'::string, '2000-01-01'::date);
 ----
 1
 
-query error Cannot extract `QUARTERS` from Date32. SQLSTATE: 42601
+# Checked when the query is planned
+skipif evaluate
+query error
 SELECT date_part('QUARTERS'::string, '2000-01-01'::date);
+----
+DataFusion error: Optimizer rule 'simplify_expressions' failed
+caused by
+Error during planning: Cannot extract `QUARTERS` from Date32. SQLSTATE: 42601
+
+
+# Without simplify it is checked when the query runs
+onlyif evaluate
+query error
+SELECT date_part('QUARTERS'::string, '2000-01-01'::date);
+----
+DataFusion error: Execution error: Cannot extract `QUARTERS` from Date32. SQLSTATE: 42601
+
+
 
 # MONTH
 query I
@@ -129,8 +145,24 @@ SELECT date_part('DOY'::string, '2000-01-01'::date);
 ----
 1
 
-query error Cannot extract `DAYOFYEAR` from Date32. SQLSTATE: 42601
+# Checked when the query is planned
+skipif evaluate
+query error
 SELECT date_part('DAYOFYEAR'::string, '2000-01-01'::date);
+----
+DataFusion error: Optimizer rule 'simplify_expressions' failed
+caused by
+Error during planning: Cannot extract `DAYOFYEAR` from Date32. SQLSTATE: 42601
+
+
+# Without simplify it is checked when the query runs
+onlyif evaluate
+query error
+SELECT date_part('DAYOFYEAR'::string, '2000-01-01'::date);
+----
+DataFusion error: Execution error: Cannot extract `DAYOFYEAR` from Date32. SQLSTATE: 42601
+
+
 
 # HOUR
 query I
@@ -228,8 +260,24 @@ SELECT date_part(NULL::string, '2000-01-01'::date);
 NULL
 
 # Invalid part
-query error Cannot extract `test` from Date32. SQLSTATE: 42601
+# Checked when the query is planned
+skipif evaluate
+query error
 SELECT date_part('test'::string, '2000-01-01'::date);
+----
+DataFusion error: Optimizer rule 'simplify_expressions' failed
+caused by
+Error during planning: Cannot extract `test` from Date32. SQLSTATE: 42601
+
+
+# Without simplify it is checked when the query runs
+onlyif evaluate
+query error
+SELECT date_part('test'::string, '2000-01-01'::date);
+----
+DataFusion error: Execution error: Cannot extract `test` from Date32. SQLSTATE: 42601
+
+
 
 query I
 SELECT date_part('year', column1)
@@ -282,3 +330,15 @@ query TTT
 DESCRIBE SELECT date_part('SECOND'::string, ts) AS s FROM (VALUES (timestamp '2020-01-01')) AS t(ts)
 ----
 s Int32 YES
+
+# A field that is only known at execution time, such as a prepared statement parameter
+statement ok
+PREPARE extract_field(VARCHAR) AS SELECT date_part($1, '2000-01-01'::date);
+
+query I
+EXECUTE extract_field('YEAR');
+----
+2000
+
+statement ok
+DEALLOCATE extract_field;
