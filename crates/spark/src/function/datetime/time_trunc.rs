@@ -6,7 +6,9 @@ use std::sync::Arc;
 
 use arrow::datatypes::{DataType, Field, FieldRef};
 use datafusion_common::types::logical_string;
-use datafusion_common::{Result, ScalarValue, internal_err, plan_err};
+use datafusion_common::{
+    Result, ScalarValue, exec_datafusion_err, internal_err, plan_datafusion_err,
+};
 use datafusion_expr::expr::ScalarFunction;
 use datafusion_expr::simplify::{ExprSimplifyResult, SimplifyContext};
 use datafusion_expr::{
@@ -99,12 +101,16 @@ impl ScalarUDFImpl for SparkTimeTrunc {
             ColumnarValue::Scalar(unit) => Some(unit),
             ColumnarValue::Array(_) => None,
         };
-        if !is_valid_unit(unit)? {
+        match check_unit(unit).map_err(|e| exec_datafusion_err!("{e}"))? {
+            Unit::Valid => {
+                datafusion_functions::datetime::date_trunc().invoke_with_args(args)
+            }
             // A NULL unit returns NULL, like Spark
-            let data_type = args.return_field.data_type();
-            return Ok(ColumnarValue::Scalar(ScalarValue::try_from(data_type)?));
+            Unit::Null => {
+                let data_type = args.return_field.data_type();
+                Ok(ColumnarValue::Scalar(ScalarValue::try_from(data_type)?))
+            }
         }
-        datafusion_functions::datetime::date_trunc().invoke_with_args(args)
     }
 
     fn simplify(
@@ -112,38 +118,49 @@ impl ScalarUDFImpl for SparkTimeTrunc {
         args: Vec<Expr>,
         info: &SimplifyContext,
     ) -> Result<ExprSimplifyResult> {
-        if !is_valid_unit(args[0].as_literal())? {
+        match check_unit(args[0].as_literal()).map_err(|e| plan_datafusion_err!("{e}"))? {
+            Unit::Valid => Ok(ExprSimplifyResult::Simplified(Expr::ScalarFunction(
+                ScalarFunction::new_udf(
+                    datafusion_functions::datetime::date_trunc(),
+                    args,
+                ),
+            ))),
             // A NULL unit returns NULL, like Spark
-            let data_type = info.get_data_type(&args[1])?;
-            return Ok(ExprSimplifyResult::Simplified(Expr::Literal(
-                ScalarValue::try_from(&data_type)?,
-                None,
-            )));
+            Unit::Null => {
+                let data_type = info.get_data_type(&args[1])?;
+                Ok(ExprSimplifyResult::Simplified(Expr::Literal(
+                    ScalarValue::try_from(&data_type)?,
+                    None,
+                )))
+            }
         }
-
-        Ok(ExprSimplifyResult::Simplified(Expr::ScalarFunction(
-            ScalarFunction::new_udf(datafusion_functions::datetime::date_trunc(), args),
-        )))
     }
 }
 
-/// Checks the `unit` argument. Returns `false` for a NULL unit and an error for
-/// an invalid or non-scalar unit.
-fn is_valid_unit(unit: Option<&ScalarValue>) -> Result<bool> {
+/// A checked `unit` argument
+enum Unit {
+    Valid,
+    Null,
+}
+
+/// Checks the `unit` argument. Returns the error message for an invalid or
+/// non-constant unit, so the caller can pick the error kind.
+fn check_unit(unit: Option<&ScalarValue>) -> std::result::Result<Unit, String> {
     match unit {
         Some(ScalarValue::Utf8(Some(unit)))
         | Some(ScalarValue::Utf8View(Some(unit)))
         | Some(ScalarValue::LargeUtf8(Some(unit))) => {
             let valid = ["HOUR", "MINUTE", "SECOND", "MILLISECOND", "MICROSECOND"];
-            if !valid.iter().any(|v| v.eq_ignore_ascii_case(unit)) {
-                return plan_err!(
+            if valid.iter().any(|v| v.eq_ignore_ascii_case(unit)) {
+                Ok(Unit::Valid)
+            } else {
+                Err(format!(
                     "The value of parameter(s) `unit` in `time_trunc` is invalid: expects one of the units 'HOUR', 'MINUTE', 'SECOND', 'MILLISECOND', 'MICROSECOND', but got '{unit}'. SQLSTATE: 22023"
-                );
+                ))
             }
-            Ok(true)
         }
-        Some(value) if value.is_null() => Ok(false),
-        _ => plan_err!("First argument of `TIME_TRUNC` must be non-null scalar Utf8"),
+        Some(value) if value.is_null() => Ok(Unit::Null),
+        _ => Err("First argument of `TIME_TRUNC` must be a constant string".to_string()),
     }
 }
 
@@ -240,6 +257,7 @@ mod tests {
         // DAY is valid for date_trunc but not for time_trunc
         for name in ["MINS", "DAY"] {
             let err = invoke(unit(name), scalar_time(0)).unwrap_err();
+            assert!(err.to_string().starts_with("Execution error:"), "{err}");
             assert!(
                 err.to_string().contains(&format!(
                     "expects one of the units 'HOUR', 'MINUTE', 'SECOND', 'MILLISECOND', 'MICROSECOND', but got '{name}'. SQLSTATE: 22023"
@@ -260,5 +278,31 @@ mod tests {
             &DataType::Time64(arrow::datatypes::TimeUnit::Nanosecond)
         );
         assert!(result.is_null(0));
+    }
+
+    #[test]
+    fn invoke_truncates_every_time_type() {
+        // 09:32:05.123456 truncated to the minute is 09:32:00
+        for (time, expected) in [
+            (
+                ScalarValue::Time32Second(Some(34_325)),
+                ScalarValue::Time32Second(Some(34_320)),
+            ),
+            (
+                ScalarValue::Time32Millisecond(Some(34_325_123)),
+                ScalarValue::Time32Millisecond(Some(34_320_000)),
+            ),
+            (
+                ScalarValue::Time64Microsecond(Some(34_325_123_456)),
+                ScalarValue::Time64Microsecond(Some(34_320_000_000)),
+            ),
+        ] {
+            let ColumnarValue::Scalar(result) =
+                invoke(unit("MINUTE"), ColumnarValue::Scalar(time)).unwrap()
+            else {
+                panic!("expected a scalar");
+            };
+            assert_eq!(result, expected);
+        }
     }
 }
