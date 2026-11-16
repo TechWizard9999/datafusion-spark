@@ -10,10 +10,158 @@
 
 ## Original Query: SELECT bround(2.5, 0);
 ## PySpark 3.5.5 Result: {'bround(2.5, 0)': Decimal('2'), 'typeof(bround(2.5, 0))': 'decimal(2,0)', 'typeof(2.5)': 'decimal(2,1)', 'typeof(0)': 'int'}
-#query
-#SELECT bround(2.5::decimal(2,1), 0::int);
+query RT
+SELECT bround(2.5::decimal(2,1), 0), arrow_typeof(bround(2.5::decimal(2,1), 0));
+----
+2 Decimal128(2, 0)
 
 ## Original Query: SELECT bround(25, -1);
 ## PySpark 3.5.5 Result: {'bround(25, -1)': 20, 'typeof(bround(25, -1))': 'int', 'typeof(25)': 'int', 'typeof(-1)': 'int'}
-#query
-#SELECT bround(25::int, -1::int);
+query IT
+SELECT bround(25::int, -1), arrow_typeof(bround(25::int, -1));
+----
+20 Int32
+
+# Default scale is 0
+query RR
+SELECT bround(2.5::double), bround(3.5::double);
+----
+2 4
+
+# Integer ties round to the even neighbour
+query IIIIII
+SELECT bround(25, -1), bround(35, -1), bround(-25, -1), bround(-35, -1), bround(26, -1), bround(-24, -1);
+----
+20 40 -20 -40 30 -20
+
+# Integer types keep their type
+query IIITTT
+SELECT bround(525::smallint, -1), bround(525::bigint, -3), bround(25::tinyint, -2),
+  arrow_typeof(bround(525::smallint, -1)), arrow_typeof(bround(525::bigint, -3)), arrow_typeof(bround(25::tinyint, -2));
+----
+520 1000 0 Int16 Int64 Int8
+
+# Non-negative scale leaves integers unchanged, very negative scale gives 0
+query III
+SELECT bround(42, 2), bround(25::tinyint, -3), bround(9223372036854775807, -40);
+----
+42 0 0
+
+# Integer overflow wraps with ANSI mode off
+query IIII
+SELECT bround(CAST(2147483647 AS INT), -1), bround(CAST(-128 AS TINYINT), -1), bround(CAST(32767 AS SMALLINT), -1),
+  bround(CAST(-9223372036854775808 AS BIGINT), -1);
+----
+-2147483646 126 -32766 9223372036854775806
+
+# Decimal ties and result types
+query RRRR
+SELECT bround(45.00::decimal(4,2), -1), bround(-0.35::decimal(2,2), 1), bround(0.125::decimal(4,3), 2),
+  bround(1.25::decimal(3,2), 5);
+----
+40 -0.4 0.12 1.25
+
+query TTTT
+SELECT arrow_typeof(bround(45.00::decimal(4,2), -1)), arrow_typeof(bround(-0.35::decimal(2,2), 1)),
+  arrow_typeof(bround(0.125::decimal(4,3), 2)), arrow_typeof(bround(1.25::decimal(3,2), 5));
+----
+Decimal128(3, 0) Decimal128(2, 1) Decimal128(4, 2) Decimal128(4, 2)
+
+query RT
+SELECT bround(5.5::decimal(2,1), -3), arrow_typeof(bround(5.5::decimal(2,1), -3));
+----
+0 Decimal128(4, 0)
+
+query RT
+SELECT bround('99999999999999999999999999999999999999'::decimal(38,0), 0),
+  arrow_typeof(bround('99999999999999999999999999999999999999'::decimal(38,0), 0));
+----
+99999999999999999999999999999999999999 Decimal128(38, 0)
+
+# A result that needs more than 38 digits fails
+query error NUMERIC_VALUE_OUT_OF_RANGE
+SELECT bround('99999999999999999999999999999999999999'::decimal(38,0), -1);
+
+# Floating-point ties round the shortest decimal representation, like Spark
+query RRRRRR
+SELECT bround(0.5::double, 0), bround(1.5::double, 0), bround(-2.5::double, 0), bround(-0.35::double, 1),
+  bround(0.125::double, 2), bround(2.675::double, 2);
+----
+0 2 -2 -0.4 0.12 2.68
+
+query RRRR
+SELECT bround(25.0::double, -1), bround(35.0::double, -1), bround(123.456::double, 400), bround(123.456::double, -400);
+----
+20 40 123.456 0
+
+# Negative zero becomes zero
+query T
+SELECT CAST(bround(-0.4::double, 0) AS VARCHAR);
+----
+0.0
+
+# FLOAT keeps its type and is widened to DOUBLE first (3.1414999961853027)
+query RRT
+SELECT bround(3.1415::float, 4), bround(3.1415::float, 3), arrow_typeof(bround(3.1415::float, 4));
+----
+3.1415 3.141 Float32
+
+query RRR
+SELECT bround('NaN'::double, 1), bround('Infinity'::double, 1), bround('-Infinity'::double, 1);
+----
+NaN Infinity -Infinity
+
+# NULL input
+query IRR
+SELECT bround(NULL::int, -1), bround(NULL::double, 1), bround(2.5::double, NULL);
+----
+NULL NULL NULL
+
+# Column input
+query R
+SELECT bround(column1, 0) FROM VALUES (0.5::double), (1.5::double), (2.5::double), (-2.5::double), (NULL::double);
+----
+0
+2
+2
+-2
+NULL
+
+query I
+SELECT bround(column1, -1) FROM VALUES (15), (25), (-15), (-25), (NULL);
+----
+20
+20
+-20
+-20
+NULL
+
+query R
+SELECT bround(column1, 1) FROM VALUES (0.25::decimal(3,2)), (0.35::decimal(3,2)), (-0.25::decimal(3,2)), (NULL::decimal(3,2));
+----
+0.2
+0.4
+-0.2
+NULL
+
+# A decimal input needs a constant scale
+query error bround requires a constant scale for decimal input
+SELECT bround(column1, column2) FROM VALUES (2.5::decimal(2,1), 0);
+
+# Integer overflow fails with ANSI mode on
+statement ok
+set datafusion.execution.enable_ansi_mode = true;
+
+query error ARITHMETIC_OVERFLOW
+SELECT bround(CAST(2147483647 AS INT), -1);
+
+query error ARITHMETIC_OVERFLOW
+SELECT bround(CAST(-128 AS TINYINT), -1);
+
+query I
+SELECT bround(25, -1);
+----
+20
+
+statement ok
+set datafusion.execution.enable_ansi_mode = false;
