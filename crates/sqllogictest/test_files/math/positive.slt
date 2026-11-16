@@ -10,5 +10,115 @@
 
 ## Original Query: SELECT positive(1);
 ## PySpark 3.5.5 Result: {'(+ 1)': 1, 'typeof((+ 1))': 'int', 'typeof(1)': 'int'}
-#query
-#SELECT positive(1::int);
+query IT
+SELECT positive(1::int), arrow_typeof(positive(1::int));
+----
+1 Int32
+
+# Integers keep their type and value, including the minimum value
+query IIII
+SELECT positive((-128)::tinyint), positive((-32768)::smallint), positive((-2147483648)::int), positive(CAST('-9223372036854775808' AS BIGINT));
+----
+-128 -32768 -2147483648 -9223372036854775808
+
+query TTTT
+SELECT arrow_typeof(positive(1::tinyint)) AS a, arrow_typeof(positive(1::smallint)) AS b, arrow_typeof(positive(1::int)) AS c, arrow_typeof(positive(1::bigint)) AS d;
+----
+Int8 Int16 Int32 Int64
+
+# Floating point values are returned unchanged
+query RRRR
+SELECT positive(1.5::float), positive(CAST('NaN' AS DOUBLE)), positive(CAST('Infinity' AS DOUBLE)), positive(CAST('-Infinity' AS DOUBLE));
+----
+1.5 NaN Infinity -Infinity
+
+query T
+SELECT arrow_typeof(positive(1.5::float));
+----
+Float32
+
+# The sign of -0.0 is kept: pow(-0.0, -1.0) is -Infinity
+query R
+SELECT pow(positive(CAST('-0.0' AS DOUBLE)), -1.0);
+----
+-Infinity
+
+# DECIMAL keeps its precision and scale
+query RT
+SELECT positive(CAST(-1.11 AS DECIMAL(3, 2))), arrow_typeof(positive(CAST(-1.11 AS DECIMAL(3, 2))));
+----
+-1.11 Decimal128(3, 2)
+
+# A STRING is cast to DOUBLE
+query RT
+SELECT positive('-1.11'), arrow_typeof(positive('-1.11'));
+----
+-1.11 Float64
+
+# A malformed STRING is NULL when ANSI mode is off
+query R
+SELECT positive('abc');
+----
+NULL
+
+# Intervals are returned unchanged
+query BT
+SELECT positive(make_dt_interval(1::int, 2::int)) = make_dt_interval(1::int, 2::int), arrow_typeof(positive(make_dt_interval(1::int, 2::int)));
+----
+true Duration(µs)
+
+query BT
+SELECT positive(arrow_cast('1 year 2 months', 'Interval(YearMonth)')) = arrow_cast('1 year 2 months', 'Interval(YearMonth)'), arrow_typeof(positive(arrow_cast('1 year 2 months', 'Interval(YearMonth)')));
+----
+true Interval(YearMonth)
+
+# NULL input
+query R
+SELECT positive(NULL);
+----
+NULL
+
+query IT
+SELECT positive(NULL::int), arrow_typeof(positive(NULL::int));
+----
+NULL Int32
+
+# Column input
+query I
+SELECT positive(column1)
+FROM VALUES
+(1::int),
+((-2)::int),
+(NULL::int);
+----
+1
+-2
+NULL
+
+# DATE, TIMESTAMP, BOOLEAN and BINARY are rejected
+query error positive requires a numeric or interval input, got Date32
+SELECT positive('1999-01-01'::date);
+
+query error positive requires a numeric or interval input, got Timestamp
+SELECT positive('1999-01-01 00:00:00'::timestamp);
+
+query error positive requires a numeric or interval input, got Boolean
+SELECT positive(true);
+
+query error positive requires a numeric or interval input, got Binary
+SELECT positive(X'01');
+
+# A malformed STRING raises an error when ANSI mode is on
+statement ok
+set datafusion.execution.enable_ansi_mode = true;
+
+query R
+SELECT positive('-1.11');
+----
+-1.11
+
+query error Cannot cast string 'abc' to value of Float64 type
+SELECT positive('abc');
+
+statement ok
+set datafusion.execution.enable_ansi_mode = false;
