@@ -168,10 +168,12 @@ impl ScalarUDFImpl for SparkDatePart {
                     FieldError::Invalid(name).message(&info.get_data_type(&date_expr)?);
                 return plan_err!("{message}");
             }
-            // Not known at planning time (e.g. a parameter), so `invoke_with_args` checks it
-            Err(FieldError::NotConstant) => {
+            // A parameter is not known at planning time, so `invoke_with_args` checks it
+            Err(FieldError::NotConstant) if matches!(part_expr, Expr::Placeholder(_)) => {
                 return Ok(ExprSimplifyResult::Original(vec![part_expr, date_expr]));
             }
+            // Any other non-literal field, such as a column, is rejected like Spark does
+            Err(FieldError::NotConstant) => return plan_err!("{NOT_CONSTANT}"),
         };
 
         let part_expr = Expr::Literal(ScalarValue::new_utf8(part), None);
@@ -204,12 +206,12 @@ impl FieldError<'_> {
             FieldError::Invalid(name) => {
                 format!("Cannot extract `{name}` from {source_type}. SQLSTATE: 42601")
             }
-            FieldError::NotConstant => {
-                "First argument of `DATE_PART` must be a constant string".to_string()
-            }
+            FieldError::NotConstant => NOT_CONSTANT.to_string(),
         }
     }
 }
+
+const NOT_CONSTANT: &str = "First argument of `DATE_PART` must be a constant string";
 
 /// Checks the `field` argument against Spark's field names. The caller formats the
 /// error with the source type and picks the error kind.
