@@ -341,6 +341,13 @@ SELECT parse_url('http://[::1/path', 'HOST');
 ----
 NULL
 
+# Known difference from Spark: java.net.URI doesn't range-check the port, so
+# Spark returns the host in both ANSI modes. Here it is NULL, or an error with ANSI.
+# query T
+# SELECT parse_url('http://spark.apache.org:99999/path', 'HOST');
+# ----
+# spark.apache.org
+
 # Mixed rows: a valid URL, a malformed URL and NULL
 query T
 SELECT parse_url(column1, 'HOST')
@@ -360,11 +367,8 @@ set datafusion.execution.enable_ansi_mode = true;
 query error DataFusion error: Execution error: The url is invalid: inva lid://spark\.apache\.org/path\?query=1\. Use `try_parse_url` to tolerate invalid URL and return NULL instead\. SQLSTATE: 22P02
 SELECT parse_url('inva lid://spark.apache.org/path?query=1', 'QUERY');
 
-query error
+query error DataFusion error: Execution error: The url is invalid: http://\[::1/path\. Use `try_parse_url` to tolerate invalid URL and return NULL instead\. SQLSTATE: 22P02
 SELECT parse_url('http://[::1/path', 'HOST');
-----
-DataFusion error: Execution error: The url is invalid: http://[::1/path. Use `try_parse_url` to tolerate invalid URL and return NULL instead. SQLSTATE: 22P02
-
 
 # try_parse_url still returns NULL when ANSI mode is on
 query T
