@@ -7,7 +7,9 @@
 pub mod abs;
 pub mod atan2;
 pub mod bin;
+pub mod bround;
 pub mod ceil;
+pub mod divide;
 pub mod expm1;
 pub mod factorial;
 pub mod floor;
@@ -47,6 +49,8 @@ make_udf_function!(trigonometry::SparkCsc, csc);
 make_udf_function!(trigonometry::SparkSec, sec);
 make_udf_function!(negative::SparkNegative, negative);
 make_udf_function!(bin::SparkBin, bin);
+make_udf_function!(bround::SparkBRound, bround);
+make_udf_function!(divide::SparkDivide, spark_divide);
 
 pub mod expr_fn {
     use datafusion_functions::export_functions;
@@ -95,6 +99,11 @@ pub mod expr_fn {
         "Returns the string representation of the long value represented in binary.",
         arg1
     ));
+    export_functions!((
+        bround,
+        "Rounds the value of expr to scale decimal places using HALF_EVEN rounding mode.",
+        arg1 arg2
+    ));
 }
 
 pub fn functions() -> Vec<Arc<ScalarUDF>> {
@@ -119,5 +128,7 @@ pub fn functions() -> Vec<Arc<ScalarUDF>> {
         negative(),
         positive(),
         bin(),
+        bround(),
+        spark_divide(),
     ]
 }
