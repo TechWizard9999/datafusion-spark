@@ -13,7 +13,7 @@ use datafusion_common::cast::{
     as_large_string_array, as_string_array, as_string_view_array,
 };
 use datafusion_common::utils::offset_span_len;
-use datafusion_common::{Result, exec_datafusion_err, exec_err, plan_err};
+use datafusion_common::{Result, exec_err, plan_err};
 use datafusion_expr::{
     ColumnarValue, Documentation, ScalarFunctionArgs, ScalarUDFImpl, Signature,
     Volatility,
@@ -29,8 +29,8 @@ use percent_encoding::percent_decode;
     doc_section(label = "URL Functions"),
     description = "Decodes a string in `application/x-www-form-urlencoded` format, the inverse of `url_encode`. \
         DataFusion has no built-in `url_decode`. `+` becomes a space and each `%XX` escape becomes the byte \
-        it encodes, and the bytes are read as UTF-8. A `%` that is not followed by two hex digits, or bytes \
-        that are not valid UTF-8, are an error; use `try_url_decode` to get NULL instead. \
+        it encodes, and the bytes are read as UTF-8, with U+FFFD for bytes that are not valid UTF-8. \
+        A `%` that is not followed by two hex digits is an error; use `try_url_decode` to get NULL instead. \
         Returns NULL if the input is NULL.",
     syntax_example = "url_decode(str)",
     sql_example = r#"```sql
@@ -79,23 +79,21 @@ impl UrlDecode {
     ///
     /// * `Ok(Cow<str>)` - The decoded string, borrowed from `value` when there
     ///   was nothing to rewrite and owned otherwise
-    /// * `Err(DataFusionError)` - If the input is malformed or contains invalid UTF-8
+    /// * `Err(DataFusionError)` - If the input is malformed
     fn decode(value: &str) -> Result<Cow<'_, str>> {
         // Check if the string has valid percent encoding
         Self::validate_percent_encoding(value)?;
 
-        match Self::replace_plus(value.as_bytes()) {
+        // Bytes that are not valid UTF-8 become U+FFFD, like Java's `URLDecoder`
+        Ok(match Self::replace_plus(value.as_bytes()) {
             // No '+' was rewritten, so the decode can borrow from `value` itself.
-            Cow::Borrowed(bytes) => percent_decode(bytes)
-                .decode_utf8()
-                .map_err(|e| exec_datafusion_err!("Invalid UTF-8 sequence: {e}")),
+            Cow::Borrowed(bytes) => percent_decode(bytes).decode_utf8_lossy(),
             // Rewriting '+' already allocated, so owning the decoded form here
             // costs nothing beyond what has been spent.
-            Cow::Owned(bytes) => percent_decode(&bytes)
-                .decode_utf8()
-                .map(|decoded| Cow::Owned(decoded.into_owned()))
-                .map_err(|e| exec_datafusion_err!("Invalid UTF-8 sequence: {e}")),
-        }
+            Cow::Owned(bytes) => {
+                Cow::Owned(percent_decode(&bytes).decode_utf8_lossy().into_owned())
+            }
+        })
     }
 
     /// Replace b'+' with b' '
