@@ -341,8 +341,9 @@ SELECT parse_url('http://[::1/path', 'HOST');
 ----
 NULL
 
-# Known difference from Spark: java.net.URI doesn't range-check the port, so
-# Spark returns the host in both ANSI modes. Here it is NULL, or an error with ANSI.
+# Known difference from Spark, tracked in #365. java.net.URI doesn't range-check
+# the port, so Spark returns the host in both ANSI modes. Here it is NULL, or an
+# error with ANSI.
 # query T
 # SELECT parse_url('http://spark.apache.org:99999/path', 'HOST');
 # ----
