@@ -84,16 +84,52 @@ impl UrlDecode {
         // Check if the string has valid percent encoding
         Self::validate_percent_encoding(value)?;
 
-        // Bytes that are not valid UTF-8 become U+FFFD, like Java's `URLDecoder`
         Ok(match Self::replace_plus(value.as_bytes()) {
             // No '+' was rewritten, so the decode can borrow from `value` itself.
-            Cow::Borrowed(bytes) => percent_decode(bytes).decode_utf8_lossy(),
+            Cow::Borrowed(bytes) => Self::decode_utf8_lossy(percent_decode(bytes).into()),
             // Rewriting '+' already allocated, so owning the decoded form here
             // costs nothing beyond what has been spent.
-            Cow::Owned(bytes) => {
-                Cow::Owned(percent_decode(&bytes).decode_utf8_lossy().into_owned())
-            }
+            Cow::Owned(bytes) => Cow::Owned(
+                Self::decode_utf8_lossy(percent_decode(&bytes).into()).into_owned(),
+            ),
         })
+    }
+
+    /// Reads `bytes` as UTF-8 the way Java's `URLDecoder` does: each invalid
+    /// sequence becomes U+FFFD. Unlike `String::from_utf8_lossy`, an encoded
+    /// surrogate (`ED` followed by `A0..=BF`, plus one more continuation byte
+    /// if present) becomes a single U+FFFD rather than one per byte.
+    fn decode_utf8_lossy(bytes: Cow<'_, [u8]>) -> Cow<'_, str> {
+        match bytes {
+            Cow::Borrowed(bytes) => match std::str::from_utf8(bytes) {
+                Ok(s) => Cow::Borrowed(s),
+                Err(_) => Cow::Owned(Self::replace_invalid_utf8(bytes)),
+            },
+            Cow::Owned(bytes) => match String::from_utf8(bytes) {
+                Ok(s) => Cow::Owned(s),
+                Err(e) => Cow::Owned(Self::replace_invalid_utf8(e.as_bytes())),
+            },
+        }
+    }
+
+    fn replace_invalid_utf8(mut rest: &[u8]) -> String {
+        let mut out = String::with_capacity(rest.len());
+        while let Some(chunk) = rest.utf8_chunks().next() {
+            out.push_str(chunk.valid());
+            let mut end = chunk.valid().len() + chunk.invalid().len();
+            if !chunk.invalid().is_empty() {
+                out.push(char::REPLACEMENT_CHARACTER);
+                if chunk.invalid() == [0xED] && matches!(rest.get(end), Some(0xA0..=0xBF))
+                {
+                    end += 1;
+                    if matches!(rest.get(end), Some(0x80..=0xBF)) {
+                        end += 1;
+                    }
+                }
+            }
+            rest = &rest[end..];
+        }
+        out
     }
 
     /// Replace b'+' with b' '
