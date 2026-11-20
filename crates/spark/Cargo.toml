@@ -118,3 +118,7 @@ name = "array_extrema"
 [[bench]]
 harness = false
 name = "array_remove"
+
+[[bench]]
+harness = false
+name = "greatest_least"
