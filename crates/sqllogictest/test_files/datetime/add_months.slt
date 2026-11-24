@@ -69,6 +69,14 @@ SELECT add_months('2024-01-31'::date, m) FROM VALUES (1::int), (-1::int), (13::i
 2023-12-31
 2025-02-28
 
+# Column of dates with a scalar month count
+query D
+SELECT add_months(d, 1::int) FROM VALUES ('2016-01-31'::date), ('2016-02-29'::date), (NULL::date) AS t(d);
+----
+2016-02-29
+2016-03-29
+NULL
+
 # Spark implicitly casts a string to DATE and returns 2024-02-29 (https://github.com/apache/datafusion-spark/issues/41)
 # xfail spark: Spark implicitly casts a string argument to DATE/TIMESTAMP, invalid strings give NULL (https://github.com/apache/datafusion-spark/issues/41)
 statement error Failed to coerce arguments to satisfy a call to 'add_months' function
