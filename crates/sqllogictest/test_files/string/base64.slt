@@ -65,6 +65,14 @@ SELECT base64(''::string);
 ----
 (empty)
 
+# Spark 4.2.0 and 3.5.9 split the output into 76-character lines joined by \r\n
+# (spark.sql.chunkBase64String.enabled is true by default); DataFusion does not
+# https://github.com/apache/datafusion-spark/issues/411
+# query T
+# SELECT base64(repeat('a', 60));
+# ----
+# YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFh\r\nYWFh
+
 query error Error during planning: Function 'base64' requires Binary, but received Int32 \(DataType: Int32\)
 SELECT base64(12::integer);
 
