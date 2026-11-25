@@ -17,9 +17,9 @@ function differs from the DataFusion built-in of the same name, if there is one.
 
 ## Scalar Functions
 
-- [Math Functions](scalar/math.md) (27)
+- [Math Functions](scalar/math.md) (28)
 - [Conditional Functions](scalar/conditional.md) (2)
-- [String Functions](scalar/string.md) (17)
+- [String Functions](scalar/string.md) (18)
 - [Binary String Functions](scalar/binary_string.md) (5)
 - [Time and Date Functions](scalar/time_and_date.md) (29)
 - [Array Functions](scalar/array.md) (10)
@@ -27,6 +27,7 @@ function differs from the DataFusion built-in of the same name, if there is one.
 - [Other Functions](scalar/other.md) (6)
 - [JSON Functions](scalar/json.md) (3)
 - [URL Functions](scalar/url.md) (3)
+- [Variant Functions](scalar/variant.md) (1)
 
 ## Aggregate Functions
 
@@ -83,6 +84,7 @@ function differs from the DataFusion built-in of the same name, if there is one.
 - [equal_null](scalar/other.md#equal_null)
 - [expm1](scalar/math.md#expm1)
 - [factorial](scalar/math.md#factorial)
+- [find_in_set](scalar/string.md#find_in_set)
 - [floor](scalar/math.md#floor)
 - [format_string](scalar/string.md#format_string)
 - [from_utc_timestamp](scalar/time_and_date.md#from_utc_timestamp)
@@ -95,6 +97,7 @@ function differs from the DataFusion built-in of the same name, if there is one.
 - [if](scalar/conditional.md#if)
 - [ilike](scalar/string.md#ilike)
 - [is_valid_utf8](scalar/string.md#is_valid_utf8)
+- [is_variant_null](scalar/variant.md#is_variant_null)
 - [json_array_length](scalar/json.md#json_array_length)
 - [json_tuple](scalar/json.md#json_tuple)
 - [last_day](scalar/time_and_date.md#last_day)
@@ -102,6 +105,7 @@ function differs from the DataFusion built-in of the same name, if there is one.
 - [len](scalar/string.md#len)
 - [length](scalar/string.md#length)
 - [like](scalar/string.md#like)
+- [log1p](scalar/math.md#log1p)
 - [luhn_check](scalar/string.md#luhn_check)
 - [make_date](scalar/time_and_date.md#make_date)
 - [make_dt_interval](scalar/time_and_date.md#make_dt_interval)
